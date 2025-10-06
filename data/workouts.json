@@ -1,0 +1,10 @@
+{
+  "low_impact": [
+    {"name": "Brisk Walking", "duration_mins": 30},
+    {"name": "Swimming", "duration_mins": 30}
+  ],
+  "moderate": [
+    {"name": "Jogging", "duration_mins": 25},
+    {"name": "Bodyweight Circuit (squats, pushups, lunges)", "duration_mins": 20}
+  ]
+}
