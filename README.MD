@@ -18,7 +18,5 @@ data/
  └── workouts.json     # Sample workouts and durations
 
 Dockerfile
-Dockerfile.backend
-Dockefile.frontend
 README.md
 ```
