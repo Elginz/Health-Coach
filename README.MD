@@ -1,14 +1,19 @@
 agent/
-  ├── mock_agent.py
-  ├── tools.py     ← new
-  ├── safety.py    ← new
-  └── memory.py    ← new
+ ├── mock_agent.py     # Mock agent logic (simulated responses)
+ ├── tools.py          # Utility functions (TDEE, meal/workout plan, logging)
+ ├── safety.py         # BMI & red-flag guardrails
+ └── memory.py         # Lightweight memory (SQLite / JSON)
+
 backend/
-  ├── main.py
-  └── requirements.txt
+ ├── main.py           # FastAPI app – routes for /api/goal, /api/chat
+ └── requirements.txt  # Python dependencies
+
 frontend/src/
-  ├── app.css
-  └── app.jsx
+ ├── app.jsx           # React/Vite SPA (Goal form + Chat view)
+ └── app.css           # Basic styles
+
 data/
-  ├── foods.json
-  └── workouts.json
+ ├── foods.json        # Sample foods and kcal values
+ └── workouts.json     # Sample workouts and durations
+
+README.md
