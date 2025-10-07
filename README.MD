@@ -1,3 +1,4 @@
+```
 agent/
  ├── mock_agent.py     # Mock agent logic (simulated responses)
  ├── tools.py          # Utility functions (TDEE, meal/workout plan, logging)
@@ -17,3 +18,4 @@ data/
  └── workouts.json     # Sample workouts and durations
 
 README.md
+```
