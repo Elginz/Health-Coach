@@ -1,61 +1,68 @@
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from typing import List, Optional
+# backend/main.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+import uvicorn
+from agent import mock_agent, memory
+from agent.tools import log_progress
+from datetime import datetime
 
-# Mock agent functions for now
-from agent import mock_agent
+app = FastAPI(title="WeightCoach API")
+memory.init_db()
 
-# --- Pydantic Models for API Contracts ---
-class UserProfile(BaseModel):
-    age: int [cite: 22]
-    sex: str [cite: 22]
-    height_cm: int [cite: 22]
-    weight_kg: float [cite: 22]
-    target_weight_kg: float [cite: 22]
-    activity: str [cite: 23]
-    conditions: Optional[List[str]] = [] [cite: 23]
-    diet: Optional[str] = None [cite: 23]
+class Profile(BaseModel):
+    age: int
+    sex: str
+    height_cm: float
+    weight_kg: float
+    target_weight: float
+    activity: str
+    conditions: Optional[list] = []
+    diet: Optional[str] = ""
 
 class GoalRequest(BaseModel):
-    user_id: str [cite: 21]
-    profile: UserProfile [cite: 22]
+    user_id: str
+    profile: Profile
 
 class ChatRequest(BaseModel):
     user_id: str
     message: str
 
-# --- FastAPI App ---
-app = FastAPI()
+class LogRequest(BaseModel):
+    user_id: str
+    date: Optional[str] = None  # ISO date or YYYY-MM-DD
+    weight_kg: float
 
 @app.post("/api/goal")
-def set_goal(request: GoalRequest):
-    """
-    Handles the initial goal setting from the user profile form.
-    """
-    # TODO: Replace with actual call to the OpenAI agent
-    # The agent would use estimate_tdee, make_meal_plan, etc.
-    return mock_agent.generate_initial_plan(request.profile)
+def set_goal(req: GoalRequest):
+    profile = req.profile.dict()
+    res = mock_agent.handle_goal_request(req.user_id, profile)
+    if res.get("trace_id") is None and len(res.get("cards", [])) == 0:
+        # likely safety rejection
+        return res
+    # persist an initial bot response in memory
+    memory.add_message(req.user_id, "bot", res["text"])
+    return res
 
 @app.post("/api/chat")
-def chat(request: ChatRequest):
-    """
-    Handles subsequent chat messages from the user.
-    """
-    # TODO: Replace with actual call to the OpenAI agent
-    # The agent would use its tool-calling ability based on the message
-    return mock_agent.generate_chat_response(request.message)
+def chat(req: ChatRequest):
+    res = mock_agent.handle_chat(req.user_id, req.message)
+    # store chat in memory if not a red-flag (already stored inside)
+    return res
 
+@app.post("/api/log")
+def log(req: LogRequest):
+    dt = req.date or datetime.utcnow().strftime("%Y-%m-%d")
+    # persist via memory + tools (tools returns simple response)
+    memory.add_message(req.user_id, "user", f"log {req.weight_kg}kg on {dt}")
+    memory.add_message(req.user_id, "bot", f"Logged weight {req.weight_kg} kg")
+    tool_res = log_progress(dt, req.weight_kg, req.user_id)
+    return {
+        "text": f"Logged {req.weight_kg} kg on {dt}.",
+        "cards": [{"type": "progress_log", "data": {"date": dt, "weight": req.weight_kg}}],
+        "actions": [],
+        "trace_id": tool_res.get("trace_id")
+    }
 
-# --- Static File Serving for Frontend ---
-app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
-
-@app.get("/")
-async def read_index():
-    return FileResponse('static/index.html')
-
-@app.get("/{catchall:path}", response_class=FileResponse)
-def read_static_files(catchall: str):
-    # This is a fallback to ensure client-side routing works with React Router
-    return FileResponse('static/index.html')
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
