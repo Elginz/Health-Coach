@@ -17,5 +17,8 @@ data/
  ├── foods.json        # Sample foods and kcal values
  └── workouts.json     # Sample workouts and durations
 
+Dockerfile
+Dockerfile.backend
+Dockefile.frontend
 README.md
 ```
