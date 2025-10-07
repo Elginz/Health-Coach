@@ -1,203 +1,89 @@
-import { useState, useEffect } from "react";
-import "./App.css";
+// frontend/src/app.jsx
+import React, { useState, useEffect } from "react";
+import ReactDOM from "react-dom/client";
+import "./app.css";
 
 function App() {
-  const [goalSet, setGoalSet] = useState(false);
+  const [view, setView] = useState("goal");
+  const [profile, setProfile] = useState({
+    age: 61, sex: "F", height_cm: 158, weight_kg: 72, target_weight: 62, activity: "light", conditions: ["type2_diabetes"], diet: "no_pork"
+  });
   const [messages, setMessages] = useState([]);
-  const [userInput, setUserInput] = useState("");
-  const [todayCard, setTodayCard] = useState(null);
-  const [weights, setWeights] = useState([]);
+  const [input, setInput] = useState("");
+  const userId = "demo";
 
-  useEffect(() => {
-    if (goalSet) {
-      fetchTodayCard();
-      fetchWeights();
-    }
-  }, [goalSet]);
-
-  const handleGoalSubmit = async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const profile = {
-      age: parseInt(formData.get("age")),
-      sex: formData.get("sex") || "F",
-      height_cm: parseInt(formData.get("height")),
-      weight_kg: parseFloat(formData.get("currentWeight")),
-      target_weight_kg: parseFloat(formData.get("targetWeight")),
-      activity: formData.get("activity") || "light",
-    };
-
-    const resp = await fetch("/api/goal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: "demo", profile }),
+  async function submitGoal(e) {
+    e && e.preventDefault();
+    const res = await fetch("/api/goal", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({user_id: userId, profile})
     });
-    const data = await resp.json();
-    setMessages([{ from: "ava", text: data.text }]);
-    setGoalSet(true);
-  };
+    const j = await res.json();
+    setMessages(prev => [...prev, {role:"bot", text: j.text}, ...(j.cards || []).map(c => ({role:"bot", card:c}))]);
+    setView("chat");
+  }
 
-  const handleChatSubmit = async (e) => {
-    e.preventDefault();
-    if (!userInput.trim()) return;
-    const userMsg = { from: "user", text: userInput };
-    setMessages((m) => [...m, userMsg]);
-    setUserInput("");
-
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: "demo", message: userInput }),
+  async function sendMessage(e) {
+    e && e.preventDefault();
+    if(!input) return;
+    setMessages(prev => [...prev, {role:"user", text: input}]);
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({user_id: userId, message: input})
     });
-    const data = await resp.json();
-    setMessages((m) => [...m, { from: "ava", text: data.text }]);
-  };
-
-  const fetchTodayCard = async () => {
-    try {
-      const resp = await fetch("/api/today");
-      if (!resp.ok) return;
-      const d = await resp.json();
-      setTodayCard(d);
-    } catch (e) {
-      // ignore
-    }
-  };
-
-  const fetchWeights = async () => {
-    try {
-      const resp = await fetch("/api/logs?user_id=demo");
-      if (!resp.ok) return;
-      const d = await resp.json();
-      setWeights(d || []);
-    } catch (e) {}
-  };
-
-  // quick log weight
-  const quickLog = async (weight) => {
-    const date = new Date().toISOString().slice(0, 10);
-    await fetch("/api/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: "demo", date, weight_kg: weight }),
-    });
-    fetchWeights();
-  };
-
-  if (!goalSet) {
-    return <GoalForm onSubmit={handleGoalSubmit} />;
+    const j = await res.json();
+    setMessages(prev => [...prev, {role:"bot", text: j.text}, ...(j.cards || []).map(c=>({role:"bot", card:c}))]);
+    setInput("");
   }
 
   return (
-    <div className="chat-container">
-      <h1>Chat with AVA</h1>
+    <div className="app">
+      <header><h1>Company A — Weight Coach</h1></header>
+      <nav>
+        <button onClick={()=>setView("goal")}>Set Goal</button>
+        <button onClick={()=>setView("chat")}>Chat</button>
+      </nav>
 
-      {todayCard && <TodayCard card={todayCard} onQuickLog={() => quickLog(weights.length ? weights[weights.length - 1].weight_kg : 0)} />}
+      {view === "goal" && (
+        <main>
+          <form onSubmit={submitGoal} className="form">
+            <label>Age <input type="number" value={profile.age} onChange={e=>setProfile({...profile, age:+e.target.value})} /></label>
+            <label>Sex <select value={profile.sex} onChange={e=>setProfile({...profile, sex:e.target.value})}><option>F</option><option>M</option></select></label>
+            <label>Height (cm) <input type="number" value={profile.height_cm} onChange={e=>setProfile({...profile, height_cm:+e.target.value})} /></label>
+            <label>Weight (kg) <input type="number" value={profile.weight_kg} onChange={e=>setProfile({...profile, weight_kg:+e.target.value})} /></label>
+            <label>Target weight (kg) <input type="number" value={profile.target_weight} onChange={e=>setProfile({...profile, target_weight:+e.target.value})} /></label>
+            <label>Activity
+              <select value={profile.activity} onChange={e=>setProfile({...profile, activity:e.target.value})}>
+                <option value="sedentary">Sedentary</option>
+                <option value="light">Light</option>
+                <option value="moderate">Moderate</option>
+                <option value="active">Active</option>
+              </select>
+            </label>
+            <button type="submit">Set Goal</button>
+          </form>
+        </main>
+      )}
 
-      <div className="message-list">
-        {messages.map((msg, index) => (
-          <div key={index} className={`message ${msg.from}`}>
-            {msg.text}
-          </div>
-        ))}
-      </div>
-
-      <form onSubmit={handleChatSubmit} className="message-form">
-        <input value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Ask AVA something..." />
-        <button type="submit">Send</button>
-      </form>
-
-      <ProgressWidget weights={weights} onLog={(w) => quickLog(w)} />
-    </div>
-  );
-}
-
-function GoalForm({ onSubmit }) {
-  return (
-    <div className="form-container">
-      <h2>Set Your Goal</h2>
-      <form onSubmit={onSubmit}>
-        <label>
-          Age: <input name="age" type="number" defaultValue="61" />
-        </label>
-        <label>
-          Sex:
-          <select name="sex" defaultValue="F">
-            <option value="F">Female</option>
-            <option value="M">Male</option>
-          </select>
-        </label>
-        <label>
-          Height (cm): <input name="height" type="number" defaultValue="158" />
-        </label>
-        <label>
-          Current Weight (kg): <input name="currentWeight" type="number" step="0.1" defaultValue="72" />
-        </label>
-        <label>
-          Target Weight (kg): <input name="targetWeight" type="number" step="0.1" defaultValue="62" />
-        </label>
-        <label>
-          Activity:
-          <select name="activity" defaultValue="light">
-            <option value="sedentary">Sedentary</option>
-            <option value="light">Light</option>
-            <option value="moderate">Moderate</option>
-            <option value="active">Active</option>
-          </select>
-        </label>
-        <button type="submit">Start My Plan</button>
-      </form>
-    </div>
-  );
-}
-
-function TodayCard({ card = {}, onQuickLog }) {
-  // card could be { text, cards: [...], actions: [...] } from /api/today
-  const title = card.title || "Today";
-  const body = card.body || card.text || "Keep to your calorie target. Move for 30 minutes.";
-  return (
-    <div className="today-card">
-      <h3>{title}</h3>
-      <p>{body}</p>
-      <div className="today-actions">
-        <button onClick={() => onQuickLog()}>Quick Log</button>
-      </div>
-    </div>
-  );
-}
-
-function ProgressWidget({ weights = [], onLog }) {
-  // Simple textual progress + mini sparkline (ASCII-style)
-  const last = weights.length ? weights[weights.length - 1].weight_kg : null;
-  const first = weights.length ? weights[0].weight_kg : null;
-  const delta = last && first ? (last - first).toFixed(1) : null;
-
-  return (
-    <div className="progress-widget">
-      <h4>Progress</h4>
-      {weights.length === 0 ? (
-        <p>No logs yet.</p>
-      ) : (
-        <>
-          <p>
-            Latest: {last} kg {delta ? `(${delta} kg since first)` : ""}
-          </p>
-          <div className="weights-list">
-            {weights.map((w, i) => (
-              <div key={i} className="weight-item">
-                <small>{w.date}</small>
-                <div>{w.weight_kg} kg</div>
+      {view === "chat" && (
+        <main>
+          <section className="chat">
+            {messages.map((m, i) => (
+              <div key={i} className={`msg ${m.role}`}>
+                {m.text && <div className="text">{m.text}</div>}
+                {m.card && <pre className="card">{JSON.stringify(m.card, null, 2)}</pre>}
               </div>
             ))}
-          </div>
-          <div className="progress-actions">
-            <button onClick={() => onLog(Math.round((last - 0.1) * 10) / 10)}>Log -0.1kg (test)</button>
-            <button onClick={() => onLog(Math.round((last + 0.1) * 10) / 10)}>Log +0.1kg (test)</button>
-          </div>
-        </>
+          </section>
+          <form onSubmit={sendMessage} className="input">
+            <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Say something..." />
+            <button type="submit">Send</button>
+          </form>
+        </main>
       )}
+      <footer>Today Card: Nudges will appear here. — Example: 30 min walk, drink 2L water.</footer>
     </div>
   );
 }
 
-export default App;
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
