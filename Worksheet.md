@@ -70,8 +70,12 @@ Bonus: +4 for auth, rate-limit, tests. /metrics
 
 # Project Structure
 / frontend (React/Vite)
+
 / backend (FastAPI)
+
 / agent (tools, memory. safety)
+
 / data (foods.json, workouts.json)
+
 README.md
 Dockerfile
