@@ -1,14 +1,7 @@
 ## WeightCoach — Small Safe Weight-loss Agent
 
-Notes & Next steps
-
-Replace agent/mock_agent.py with a real agent using OpenAI Agent SDK / Responses API; the mock demonstrates tool-calling.
-
-Populate data/foods.json and data/workouts.json for richer meal/workout plans.
-
-Add authentication, rate-limiting, TLS for production.
-
-Add tests, CI, and a production-build frontend (Vite -> static -> Nginx).
+docker build -t ava_prototype .  
+docker run -p 8000:8000 --env-file .env ava_prototype
 ----
 
 ## What this repo contains
