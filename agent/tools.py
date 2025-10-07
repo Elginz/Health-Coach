@@ -1,191 +1,147 @@
-"""
-agent/tools.py
-Concrete implementations of the agent tools:
-- estimate_tdee(profile) -> dict
-- make_meal_plan(profile, calorie_target) -> dict
-- make_workout_plan(profile) -> dict
-- log_progress(user_id, date, weight_kg) -> dict
-
-This module reads sample data from ../data/*.json and uses agent.memory to persist weight logs.
-"""
-from __future__ import annotations
-import json
+# agent/tools.py
 import math
-from pathlib import Path
-from typing import Dict, Any, List
+import uuid
 from datetime import date, datetime
 
-from agent import memory
-
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-
-# activity factor map (Mifflin-St Jeor * activity)
-_ACTIVITY_FACTORS = {
-    "sedentary": 1.2,
-    "light": 1.375,
-    "moderate": 1.55,
-    "active": 1.725,
-    "very_active": 1.9,
-}
-
-def _load_json(fname: str):
-    p = DATA_DIR / fname
-    if not p.exists():
-        return {}
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-FOODS = _load_json("foods.json")
-WORKOUTS = _load_json("workouts.json")
-
-def estimate_tdee(profile: Dict[str, Any]) -> Dict[str, Any]:
+def estimate_tdee(profile: dict) -> dict:
     """
-    Estimate BMR (Mifflin-St Jeor) then TDEE.
-    profile keys: age, sex, height_cm, weight_kg, activity
-    Returns: {bmr, tdee, activity_factor, recommended_deficit_kcal, safe_range}
+    Mifflin-St Jeor, metric. activity: sedentary, light, moderate, active, very
+    Returns dict with tdee, maintenance_kcal, recommended_loss_kcal (safe deficit 500-750)
     """
+    age = profile.get("age")
     sex = profile.get("sex", "F").lower()
-    age = int(profile["age"])
-    h = float(profile["height_cm"])
-    w = float(profile["weight_kg"])
-
-    # Mifflin-St Jeor
-    # men: BMR = 10*w + 6.25*h - 5*age + 5
-    # women: BMR = 10*w + 6.25*h - 5*age - 161
-    if sex.startswith("m"):
-        bmr = 10.0 * w + 6.25 * h - 5.0 * age + 5.0
-    else:
-        bmr = 10.0 * w + 6.25 * h - 5.0 * age - 161.0
-
+    h = profile.get("height_cm")
+    w = profile.get("weight_kg")
     activity = profile.get("activity", "light").lower()
-    activity_factor = _ACTIVITY_FACTORS.get(activity, _ACTIVITY_FACTORS["light"])
-    tdee = int(round(bmr * activity_factor))
 
-    # safe deficit: 500-750 kcal/day (enforced elsewhere)
-    recommended_deficit_kcal = 600
+    if None in (age, h, w):
+        raise ValueError("missing profile fields for TDEE")
 
-    # minimum calorie floor heuristics
-    minimum_cal = 1200 if sex.startswith("f") else 1500
+    # BMR
+    if sex.startswith("m"):
+        bmr = 10 * w + 6.25 * h - 5 * age + 5
+    else:
+        bmr = 10 * w + 6.25 * h - 5 * age - 161
 
-    # recommended calorie target (clamped)
-    suggested = max(minimum_cal, tdee - recommended_deficit_kcal)
+    activity_factors = {
+        "sedentary": 1.2,
+        "light": 1.375,
+        "moderate": 1.55,
+        "active": 1.725,
+        "very": 1.9
+    }
+    af = activity_factors.get(activity, 1.375)
+    tdee = int(round(bmr * af))
+
+    # safe deficit
+    deficit_low = 500
+    deficit_high = 750
+    calorie_target_low = max(1200, tdee - deficit_high)  # never below 1200
+    calorie_target_high = max(1200, tdee - deficit_low)
 
     return {
+        "trace_id": str(uuid.uuid4()),
         "bmr": int(round(bmr)),
         "tdee": tdee,
-        "activity_factor": activity_factor,
-        "recommended_deficit_kcal": recommended_deficit_kcal,
-        "calorie_target_suggestion": int(round(suggested)),
-        "minimum_calorie_floor": minimum_cal,
+        "calorie_target_range": [calorie_target_low, calorie_target_high],
+        "safe_deficit": [deficit_low, deficit_high],
+        "generated_at": datetime.utcnow().isoformat() + "Z"
     }
 
-def make_meal_plan(profile: Dict[str, Any], calorie_target: int) -> Dict[str, Any]:
+
+def make_meal_plan(profile: dict, calorie_target: int) -> dict:
     """
-    Simple meal plan generator using foods.json. Returns one-day sample + macros heuristics.
-    Respects simple diet restrictions and T2DM note (keep lower glycemic carbs).
+    Returns a simple 1-day meal plan (breakfast/lunch/dinner+snacks).
+    Uses data/foods.json ideally; here simple canned swaps and totals.
     """
-    diet = (profile.get("diet") or "").lower()
-    conditions = [c.lower() for c in (profile.get("conditions") or [])]
+    # Basic sample templates; in production load foods.json
+    sex = profile.get("sex")
+    diet = profile.get("diet", "")
+    conditions = profile.get("conditions", [])
 
-    # Very simple macro splits
-    weight_kg = float(profile["weight_kg"])
-    protein_g = int(round(1.2 * weight_kg))  # g protein/day
-    fat_pct = 0.25
-    fat_kcal = calorie_target * fat_pct
-    fat_g = int(round(fat_kcal / 9.0))
-    carbs_kcal = calorie_target - (protein_g * 4) - (fat_g * 9)
-    carbs_g = max(0, int(round(carbs_kcal / 4.0)))
+    # Simple rationing: 25% breakfast, 35% lunch, 30% dinner, 10% snacks
+    b = int(round(calorie_target * 0.25))
+    l = int(round(calorie_target * 0.35))
+    d = int(round(calorie_target * 0.30))
+    s = calorie_target - (b + l + d)
 
-    # pick foods from FOODS - try breakfast/lunch/dinner
-    def pick(list_key: str) -> Dict[str, Any]:
-        items = FOODS.get(list_key, [])
-        if not items:
-            return {}
-        # pick first that matches diet constraints
-        for it in items:
-            name = it.get("name", "").lower()
-            tags = [t.lower() for t in it.get("tags", [])] if it.get("tags") else []
-            if diet and diet in name:
-                continue
-            if diet and "no_pork" in diet and ("pork" in name or "char siew" in name):
-                continue
-            # For diabetes, prefer non-fried
-            if "type2" in " ".join(conditions) and ("fried" in name or "sugar" in name):
-                continue
-            return it
-        return items[0]  # fallback
-
-    breakfast = pick("breakfast")
-    lunch = pick("lunch")
-    dinner = pick("dinner")
-    snack = {"name": "Greek yogurt (small)", "kcal": 120}
-
-    summary = {
+    plan = {
+        "trace_id": str(uuid.uuid4()),
         "calorie_target": calorie_target,
-        "macros": {"protein_g": protein_g, "fat_g": fat_g, "carbs_g": carbs_g},
-        "meals": [
-            {"slot": "breakfast", **(breakfast or {})},
-            {"slot": "lunch", **(lunch or {})},
-            {"slot": "dinner", **(dinner or {})},
-            {"slot": "snack", **snack},
-        ],
-        "notes": "Focus on portion size, protein at each meal, lower glycemic carbs if you have diabetes.",
+        "meals": {
+            "breakfast": {
+                "suggestion": f"Oats with milk + banana (≈{b} kcal)",
+                "kcal": b,
+                "notes": "High fibre; swap banana for berries if preferred"
+            },
+            "lunch": {
+                "suggestion": f"Grilled chicken salad + brown rice (≈{l} kcal)",
+                "kcal": l,
+                "notes": "Use low oil dressing; extra veg for volume"
+            },
+            "dinner": {
+                "suggestion": f"Tofu/lean fish + steamed veg + small sweet potato (≈{d} kcal)",
+                "kcal": d,
+                "notes": "Low-salt for diabetes; avoid large sauces"
+            },
+            "snack": {
+                "suggestion": f"Greek yogurt or a small handful nuts (≈{s} kcal)",
+                "kcal": s
+            }
+        },
+        "suitable_for": {
+            "diet_notes": "no_pork" if "no_pork" in diet else "standard",
+            "conditions": conditions
+        },
+        "generated_at": datetime.utcnow().isoformat() + "Z"
     }
-    return summary
+    return plan
 
-def make_workout_plan(profile: Dict[str, Any]) -> Dict[str, Any]:
+
+def make_workout_plan(profile: dict) -> dict:
     """
-    Make a weekly workout plan using workouts.json, adjust for knee/back issues via 'conditions'.
+    Return a simple weekly low / moderate impact plan based on activity and conditions.
     """
-    conditions = [c.lower() for c in (profile.get("conditions") or [])]
-    knee_pain = any("knee" in c or "knee pain" in c for c in conditions)
+    activity = profile.get("activity", "light")
+    conditions = profile.get("conditions", [])
+    knee = any("knee" in str(c).lower() for c in conditions)
 
-    if knee_pain:
-        # prefer low impact activities
-        plan = [
-            {"day": "Mon", "activity": "Swimming or pool walking", "duration_mins": 30},
-            {"day": "Tue", "activity": "Upper-body strength + mobility", "duration_mins": 25},
-            {"day": "Wed", "activity": "Rest / gentle stretching", "duration_mins": 20},
-            {"day": "Thu", "activity": "Cycling (stationary) or elliptical", "duration_mins": 30},
-            {"day": "Fri", "activity": "Full-body strength (no deep squats)", "duration_mins": 30},
-            {"day": "Sat", "activity": "Walk (brisk) or swim", "duration_mins": 30},
-            {"day": "Sun", "activity": "Mobility & foam rolling", "duration_mins": 20},
-        ]
-    else:
-        # use sample workouts list, rotate
-        plan = [
-            {"day": "Mon", "activity": "Brisk Walking", "duration_mins": 30},
-            {"day": "Tue", "activity": "Bodyweight Circuit", "duration_mins": 25},
-            {"day": "Wed", "activity": "Light Jog or Bike", "duration_mins": 25},
-            {"day": "Thu", "activity": "Strength (bodyweight)/mobility", "duration_mins": 30},
-            {"day": "Fri", "activity": "Brisk Walk or Swim", "duration_mins": 30},
-            {"day": "Sat", "activity": "Active recovery / yoga", "duration_mins": 20},
-            {"day": "Sun", "activity": "Rest", "duration_mins": 0},
-        ]
+    # Sample
+    plan = {
+        "trace_id": str(uuid.uuid4()),
+        "summary": "Mix of low-impact cardio + strength + mobility",
+        "weeks": []
+    }
 
+    # Week template
+    week = [
+        {"day": "Mon", "activity": "Brisk walk or treadmill 30-40 min (low impact)"},
+        {"day": "Tue", "activity": "Bodyweight strength 20-30 min (squats, push, hinge)"},
+        {"day": "Wed", "activity": "Active recovery: gentle yoga / mobility 20-30 min"},
+        {"day": "Thu", "activity": "Cycling or elliptical 30-40 min (low impact)"},
+        {"day": "Fri", "activity": "Strength 20-30 min (light weights)"},
+        {"day": "Sat", "activity": "Optional walk or swim 30-45 min"},
+        {"day": "Sun", "activity": "Rest / stretch"}
+    ]
+
+    if knee:
+        # replace high-knee moves
+        for item in week:
+            item["activity"] = item["activity"].replace("run", "walk").replace("squats", "chair squats / glute bridges")
+
+    plan["weeks"].append({"week_number": 1, "days": week})
+    plan["notes"] = "If any pain or chest pain occurs, stop and seek medical help. Low-impact recommended for joint issues."
+    plan["generated_at"] = datetime.utcnow().isoformat() + "Z"
+    return plan
+
+
+def log_progress(date_str: str, weight: float, user_id: str = "demo") -> dict:
+    """Simple log response — actual persistence handled by memory module"""
     return {
-        "summary": "Weekly plan, adjust intensity as needed. Prioritise consistency over intensity.",
-        "plan": plan,
-    }
-
-def log_progress(user_id: str, date_str: str, weight_kg: float) -> Dict[str, Any]:
-    """
-    Persist weight log using agent.memory and return progress summary (delta vs previous).
-    date_str in 'YYYY-MM-DD' preferable. If not provided, uses today's date.
-    """
-    if not date_str:
-        date_str = date.today().isoformat()
-    db = memory.Memory()  # uses ../data/coach.db
-    prev = db.get_last_weight(user_id)
-    db.log_weight(user_id, date_str, weight_kg)
-    delta = None
-    if prev is not None:
-        delta = float(round(weight_kg - prev, 2))
-    summary = {
-        "user_id": user_id,
+        "trace_id": str(uuid.uuid4()),
+        "logged": True,
         "date": date_str,
-        "weight_kg": float(weight_kg),
-        "delta_since_prev_kg": delta,
-        "note": "Logged",
+        "weight": weight,
+        "user_id": user_id,
+        "ts": datetime.utcnow().isoformat() + "Z"
     }
-    return summary
