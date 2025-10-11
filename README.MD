@@ -24,7 +24,7 @@ python backend/main.py
 
 ```
 agent/
- ├── mock_agent.py     # Mock agent logic (simulated responses)
+ ├── agent.py     # Mock agent logic (simulated responses)
  ├── tools.py          # Utility functions (TDEE, meal/workout plan, logging)
  ├── safety.py         # BMI & red-flag guardrails
  └── memory.py         # Lightweight memory (SQLite / JSON)
@@ -37,10 +37,16 @@ frontend/src/
  ├── app.jsx           # React/Vite SPA (Goal form + Chat view)
  └── app.css           # Basic styles
 
+frontend/
+ ├── index.html        # basic index
+ ├── vite.config.js    # basic index
+ └── package.json           
+
 data/
  ├── foods.json        # Sample foods and kcal values
  └── workouts.json     # Sample workouts and durations
 
+.env                   # openAI pass key
 Dockerfile
 README.md
 
